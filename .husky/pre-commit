@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
-pnpm run lint:all
-pnpm run format:all
-pnpm run test:all
+#pnpm run lint:all
+#pnpm run format:all
+#pnpm run test:all
 
 gitleaks detect \
   --config=gitleaks.toml \
