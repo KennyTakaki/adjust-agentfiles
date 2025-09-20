@@ -1,0 +1,39 @@
+{
+  "name": "someapp",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "vscode",
+      "uid": "1000",
+      "gid": "1000",
+      "upgradePackages": true
+    },
+    "ghcr.io/devcontainers/features/aws-cli:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.12",
+      "installTools": true,
+      "toolsToInstall": "pipenv,pylint"
+    },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "runArgs": [
+    "--volume=/var/run/docker.sock:/var/run/docker.sock"
+  ],
+  "updateRemoteUserUID": false,
+  "overrideCommand": true,
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode","ms-azuretools.vscode-docker"]
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh"
+}

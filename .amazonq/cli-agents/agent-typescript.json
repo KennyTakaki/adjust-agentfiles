@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/aws/amazon-q-developer-cli/refs/heads/main/schemas/agent-v1.json",
+  "name": "typescript-agent",
+  "description": "A specialized agent for AWS and TypeScript development tasks",
+  "mcpServers": {
+    "fetch": {
+      "command": "fetch3.1",
+      "args": []
+    },
+    "git": {
+      "command": "git-mcp",
+      "args": []
+    }
+  },
+  "tools": ["fs_read", "fs_write", "execute_bash", "use_aws", "@git", "@fetch/fetch_url"],
+  "toolAliases": {
+    "@git/git_status": "status",
+    "@fetch/fetch_url": "get"
+  },
+  "allowedTools": ["fs_read", "@git/git_status"],
+  "toolsSettings": {
+    "fs_write": {
+      "allowedPaths": ["src/**", "apps/**", "packages/**", "tests/**", "*.ts", "*.tsx", "*.js", "*.jsx", "*.json", "package.json", "tsconfig*.json", "jest.config.*", "turbo.json", "pnpm-workspace.yaml"]
+    },
+    "execute_bash": {
+      "allowedCommands": ["npm test", "npm run build", "npm run dev", "pnpm test", "pnpm build", "pnpm dev", "tsc", "eslint", "prettier"]
+    },
+    "use_aws": {
+      "allowedServices": ["s3", "lambda", "apigateway", "dynamodb"]
+    }
+  },
+  "resources": ["file://README.md", "file://docs/**/*.md", "file://package.json", "file://tsconfig*.json"],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "git status"
+      }
+    ],
+    "userPromptSubmit": [
+      {
+        "command": "ls -la"
+      }
+    ]
+  },
+  "useLegacyMcpJson": true,
+  "model": "claude-sonnet-4"
+}

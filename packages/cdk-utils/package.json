@@ -1,0 +1,27 @@
+{
+  "name": "@frommiddle/cdk-utils",
+  "version": "0.0.1",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint \"src/**/*.{ts,tsx,js}\" --no-error-on-unmatched-pattern",
+    "format": "prettier -w .",
+    "test": "jest --config ./jest.config.mjs",
+    "test:watch": "jest --config --watch ./jest.config.mjs"
+  },
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.213.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "aws-cdk-lib": "2.213.0",
+    "constructs": "^10.4.2",
+    "jest": "^30.1.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}

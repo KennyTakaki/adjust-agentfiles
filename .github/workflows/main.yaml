@@ -1,0 +1,265 @@
+name: CI Workflow
+
+on:
+  push:
+    branches:
+      - "feature/**"
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+      - dev
+
+jobs:
+  prereq:
+    runs-on: ubuntu-latest
+    outputs:
+      dev_configured: ${{ steps.check.outputs.dev_configured }}
+      prod_configured: ${{ steps.check.outputs.prod_configured }}
+      missing_dev: ${{ steps.check.outputs.missing_dev }}
+      missing_prod: ${{ steps.check.outputs.missing_prod }}
+    steps:
+      - id: check
+        name: Check required secrets/vars for each environment
+        run: |
+          missing_common=()
+          [[ -z "${{ vars.AWS_REGION }}" ]] && missing_common+=(AWS_REGION)
+          [[ -z "${{ vars.PROJECT }}"   ]] && missing_common+=(PROJECT)
+          [[ -z "${{ vars.SERVICE }}"   ]] && missing_common+=(SERVICE)
+
+          # dev 用
+          missing_dev=("${missing_common[@]}")
+          [[ -z "${{ secrets.AWS_DEV_OIDC_ROLE_ARN }}" ]] && missing_dev+=(AWS_DEV_OIDC_ROLE_ARN)
+          if (( ${#missing_dev[@]} )); then
+            echo "dev_configured=false" >> $GITHUB_OUTPUT
+            printf "missing_dev=%s\n" "${missing_dev[*]}" >> $GITHUB_OUTPUT
+          else
+            echo "dev_configured=true" >> $GITHUB_OUTPUT
+            echo "missing_dev=" >> $GITHUB_OUTPUT
+          fi
+
+          # prod 用
+          missing_prod=("${missing_common[@]}")
+          [[ -z "${{ secrets.AWS_PROD_OIDC_ROLE_ARN }}" ]] && missing_prod+=(AWS_PROD_OIDC_ROLE_ARN)
+          if (( ${#missing_prod[@]} )); then
+            echo "prod_configured=false" >> $GITHUB_OUTPUT
+            printf "missing_prod=%s\n" "${missing_prod[*]}" >> $GITHUB_OUTPUT
+          else
+            echo "prod_configured=true" >> $GITHUB_OUTPUT
+            echo "missing_prod=" >> $GITHUB_OUTPUT
+          fi
+
+          {
+            echo "### Prerequisite check"
+            echo ""
+            echo "- dev_configured:  ${{ steps.check.outputs.dev_configured }}"
+            echo "- prod_configured: ${{ steps.check.outputs.prod_configured }}"
+            echo "- missing_dev:     ${missing_dev[*]:-none}"
+            echo "- missing_prod:    ${missing_prod[*]:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  set-stage-variable:
+    needs: prereq
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      stage: ${{ steps.stage.outputs.stage }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - id: stage
+        name: Set STAGE for this run
+        run: |
+          echo "Triggered by ref: ${{ github.ref }} (head_ref=${{ github.head_ref }})"
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.pull_request.merged }}" == "true" ]]; then
+            # PRマージ時はマージ先ブランチで判定(github.base_refはmerge成功時にマージ先のブランチ名となる)
+            if [[ "${{ github.base_ref }}" == "main" ]]; then
+              stage="prod"
+            elif [[ "${{ github.base_ref }}" == "dev" ]]; then
+              stage="dev"
+            else
+              stage="preview"
+            fi
+          else
+            # push 等は ref で判定(github.base_refやhead_refはマージ時に空になるのでrefを利用)
+            if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+              stage="prod"
+            elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+              stage="dev"
+            else
+              stage="preview"
+            fi
+          fi
+          echo "STAGE=$stage" >> $GITHUB_ENV
+          echo "stage=$stage" >> $GITHUB_OUTPUT
+
+      - name: Echo current stage
+        run: echo "Current stage is $STAGE"
+
+  build:
+    needs: set-stage-variable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      STAGE: ${{ needs.set-stage-variable.outputs.stage }}
+      PROJECT: ${{ vars.PROJECT }}
+      SERVICE: ${{ vars.SERVICE }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build all apps and packages
+        run: pnpm run build:all
+
+  deploy-dev:
+    needs: [prereq, set-stage-variable, build]
+    if: >
+      needs.set-stage-variable.outputs.stage == 'dev' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      needs.prereq.outputs.dev_configured == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # needed for OIDC
+    env:
+      STAGE: ${{ needs.set-stage-variable.outputs.stage }}
+      PROJECT: ${{ vars.PROJECT }}
+      SERVICE: ${{ vars.SERVICE }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install root dependencies
+        run: pnpm install
+
+      - name: Configure AWS credentials via OIDC (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # execute deploy
+      - name: CDK synth (dev)
+        working-directory: packages/infra
+        run: |
+          pnpm install
+          pnpm cdk synth \
+            --context stage=${{ env.STAGE }} \
+            --context project=${{ env.PROJECT }} \
+            --context service=${{ env.SERVICE }}
+
+      - name: CDK deploy (dev)
+        working-directory: packages/infra
+        run: |
+          pnpm cdk deploy \
+            --require-approval never \
+            --context stage=${{ env.STAGE }} \
+            --context project=${{ env.PROJECT }} \
+            --context service=${{ env.SERVICE }}
+
+  deploy-prod:
+    needs: [prereq, set-stage-variable, build]
+    if: >
+      needs.set-stage-variable.outputs.stage == 'prod' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      needs.prereq.outputs.prod_configured == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      STAGE: ${{ needs.set-stage-variable.outputs.stage }}
+      PROJECT: ${{ vars.PROJECT }}
+      SERVICE: ${{ vars.SERVICE }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: npm install -g pnpm
+      - run: pnpm install
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: CDK synth (prod)
+        working-directory: packages/infra
+        run: |
+          pnpm install
+          pnpm -w run build:all
+          pnpm cdk synth \
+            --context stage=${{ env.STAGE }} \
+            --context project=${{ env.PROJECT }} \
+            --context service=${{ env.SERVICE }}
+      - name: CDK deploy (prod)
+        working-directory: packages/infra
+        run: |
+          pnpm cdk deploy \
+            --require-approval never \
+            --context stage=${{ env.STAGE }} \
+            --context project=${{ env.PROJECT }} \
+            --context service=${{ env.SERVICE }}
+
+  # tag for main
+  tag-on-main:
+    needs: deploy-prod
+    if: github.base_ref == 'main' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          latest=$(git tag --sort=-v:refname | head -n 1)
+          echo "Latest tag: $latest"
+          echo "latest_tag=$latest" >> $GITHUB_OUTPUT
+
+      - name: Create new tag (semver patch bump as placeholder)
+        run: |
+          latest=${{ steps.get_tag.outputs.latest_tag }}
+          if [[ -z "$latest" ]]; then
+            new_tag="v0.1.0"
+          else
+            IFS='.' read -r major minor patch <<< "${latest#v}"
+            patch=$((patch + 1))
+            new_tag="v$major.$minor.$patch"
+          fi
+          echo "New tag: $new_tag"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "$new_tag"
+          git push origin "$new_tag"

@@ -1,0 +1,26 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build output
+dist
+build
+out
+coverage
+.turbo
+.cache
+.next
+.vitest
+
+# IDE / Devcontainer
+.vscode
+.devcontainer
+
+# Temp / logs
+.tmp
+.temp
+*.log
+.pnpm-debug.log
+
+# Generated
+*.d.ts
